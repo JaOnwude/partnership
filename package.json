@@ -13,6 +13,8 @@
     "seed": "tsx --env-file=.env.local scripts/seed.ts"
   },
   "dependencies": {
+    "@neon/config": "^1.9.6",
+    "@neon/env": "^1.6.6",
     "@neondatabase/serverless": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.4",

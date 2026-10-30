@@ -6,8 +6,8 @@ Stack: Next.js (App Router) + TypeScript + Tailwind, Neon Postgres + Drizzle, de
 
 ## Setup
 
-1. Create a free project at [neon.tech](https://neon.tech) and copy the pooled connection string.
-2. `cp .env.example .env.local` and fill in `DATABASE_URL` and `SESSION_SECRET`.
+1. Pull the Neon connection strings into `.env.local` with `npx neon@latest env pull` (the project is linked in `neon.ts`; run `npx neon@latest login` first if asked).
+2. Add `SESSION_SECRET` and `SEED_PIN` to `.env.local` (see `.env.example`).
 3. Install and create the tables:
 
 ```bash
