@@ -1,0 +1,16 @@
+{
+  "year": 2027,
+  "slotTarget": 100000,
+  "members": [
+    { "name": "Ada Example", "phone": "08000000001", "role": "owner",
+      "shares": [{ "month": 1, "amount": 100000 }, { "month": 4, "amount": 50000 }] },
+    { "name": "Bisi Example", "phone": "08000000002", "role": "admin",
+      "shares": [{ "month": 2, "amount": 50000 }] },
+    { "name": "Chidi Example", "phone": "08000000003",
+      "shares": [{ "month": 2, "amount": 50000 }, { "month": 3, "amount": 25000 }] },
+    { "name": "Dayo Example", "phone": "08000000004",
+      "shares": [{ "month": 3, "amount": 25000 }, { "month": 4, "amount": 25000 }] },
+    { "name": "Emeka Example", "phone": "08000000005",
+      "shares": [{ "month": 3, "amount": 50000 }, { "month": 4, "amount": 25000 }] }
+  ]
+}
