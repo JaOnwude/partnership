@@ -120,6 +120,16 @@ export const posts = pgTable("posts", {
   at: at("at").notNull().defaultNow(),
 });
 
+// One row per device a member turned notifications on for.
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: id(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  endpoint: text().notNull().unique(),
+  p256dh: text().notNull(),
+  auth: text().notNull(),
+  createdAt: at("created_at").notNull().defaultNow(),
+});
+
 export const auditLog = pgTable("audit_log", {
   id: id(),
   actorId: integer("actor_id").references(() => users.id),
