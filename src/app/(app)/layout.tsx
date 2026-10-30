@@ -4,12 +4,13 @@ import { Suspense, type ReactNode } from "react";
 import { getDb } from "@/db";
 import { payments } from "@/db/schema";
 import { requireUser } from "@/lib/auth/dal";
+import { NavMenu, type NavLink } from "@/components/nav-menu";
 import { canAdminister } from "@/lib/auth/roles";
 import { logout } from "./actions";
 
 async function Nav() {
   const user = await requireUser();
-  const links = [
+  const links: NavLink[] = [
     { href: "/board", label: "Board" },
     { href: "/updates", label: "Updates" },
     { href: "/pay", label: "Pay" },
@@ -20,33 +21,17 @@ async function Nav() {
       .select({ waiting: count() })
       .from(payments)
       .where(eq(payments.status, "pending"));
-    links.push({ href: "/admin", label: waiting ? `Admin (${waiting})` : "Admin" });
+    links.push({ href: "/admin", label: "Admin", count: waiting });
   }
 
-  return (
-    <nav className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-      {links.map((l) => (
-        <Link key={l.href} href={l.href} className="font-medium text-white/90 hover:text-white">
-          {l.label}
-        </Link>
-      ))}
-      <Link href="/account" title="Your payout account" className="ml-auto text-white/80 underline-offset-2 hover:underline">
-        {user.name}
-      </Link>
-      <form action={logout}>
-        <button type="submit" className="rounded-lg bg-white/15 px-3 py-1 font-medium hover:bg-white/25">
-          Sign out
-        </button>
-      </form>
-    </nav>
-  );
+  return <NavMenu links={links} userName={user.name} logout={logout} />;
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <>
-      <header className="bg-gradient-to-r from-brand to-accent text-white">
-        <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+      <header className="sticky top-0 z-30 bg-gradient-to-r from-brand to-accent text-white">
+        <div className="relative mx-auto flex h-16 max-w-4xl items-center gap-x-6 px-4">
           <Link href="/board" className="text-lg font-bold">
             Partnership
           </Link>
