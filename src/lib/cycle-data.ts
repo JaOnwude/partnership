@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { cycles, fineWaivers, payments, payouts, shares, users } from "@/db/schema";
 import { summariseRound } from "./rules";
@@ -19,7 +19,7 @@ export async function getActiveCycle(): Promise<Cycle | null> {
 
 export async function loadCycleData(cycleId: number) {
   const db = getDb();
-  const [people, cycleShares, approved, waivers, sent] = await Promise.all([
+  const [people, cycleShares, allPayments, waivers, sent] = await Promise.all([
     db.select({ id: users.id, name: users.name }).from(users),
     db
       .select({
@@ -31,10 +31,7 @@ export async function loadCycleData(cycleId: number) {
       .from(shares)
       .where(eq(shares.cycleId, cycleId))
       .orderBy(shares.payoutMonth, shares.id),
-    db
-      .select()
-      .from(payments)
-      .where(and(eq(payments.cycleId, cycleId), eq(payments.status, "approved"))),
+    db.select().from(payments).where(eq(payments.cycleId, cycleId)).orderBy(desc(payments.submittedAt)),
     db.select().from(fineWaivers).where(eq(fineWaivers.cycleId, cycleId)),
     db
       .select({ payout: payouts })
@@ -45,7 +42,10 @@ export async function loadCycleData(cycleId: number) {
   return {
     names: new Map(people.map((p) => [p.id, p.name])),
     shares: cycleShares,
-    payments: approved,
+    payments: allPayments.filter((p) => p.status === "approved"),
+    // Newest first, so the first match per member and round is their latest submission.
+    pending: allPayments.filter((p) => p.status === "pending"),
+    rejected: allPayments.filter((p) => p.status === "rejected"),
     waivers,
     payouts: new Map(sent.map((r) => [r.payout.shareId, r.payout])),
   };
@@ -69,6 +69,15 @@ export function summarise(cycle: Cycle, data: CycleData, round: number, now: Dat
     deadline: roundDeadline(cycle.year, round),
     now,
   });
+}
+
+// Members who can still pay this round: they owe something and have nothing approved or pending.
+export function paymentOptions(data: CycleData, summary: ReturnType<typeof summarise>, round: number) {
+  const pendingUsers = new Set(data.pending.filter((p) => p.round === round).map((p) => p.payerUserId));
+  return summary.members
+    .filter((m) => !m.payment && !pendingUsers.has(m.userId) && m.owed + m.own > 0)
+    .map((m) => ({ userId: m.userId, name: data.names.get(m.userId) ?? "?", owed: m.owed, own: m.own }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // A valid ?round= value, otherwise the round currently collecting.

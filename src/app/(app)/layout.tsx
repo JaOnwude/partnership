@@ -1,17 +1,29 @@
+import { count, eq } from "drizzle-orm";
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
+import { getDb } from "@/db";
+import { payments } from "@/db/schema";
 import { requireUser } from "@/lib/auth/dal";
 import { canAdminister } from "@/lib/auth/roles";
 import { logout } from "./actions";
 
 async function Nav() {
   const user = await requireUser();
-  const links = [{ href: "/board", label: "Board" }];
+  const links = [
+    { href: "/board", label: "Board" },
+    { href: "/pay", label: "Pay" },
+  ];
   if (canAdminister(user.role)) {
+    const [{ waiting }] = await getDb()
+      .select({ waiting: count() })
+      .from(payments)
+      .where(eq(payments.status, "pending"));
     links.push(
+      { href: "/admin/approvals", label: waiting ? `Approvals (${waiting})` : "Approvals" },
       { href: "/admin/payouts", label: "Payouts" },
       { href: "/admin/cycles", label: "Cycles" },
       { href: "/admin/members", label: "Members" },
+      { href: "/admin/activity", label: "Activity" },
     );
   }
 

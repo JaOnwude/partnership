@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { CopyButton } from "@/components/copy-button";
-import { btnGhost, Card, Loading, NoCycle, PageTitle, RoundPicker, Stat, StatusBadge } from "@/components/ui";
+import { btn, btnGhost, Card, Loading, NoCycle, PageTitle, RoundPicker, Stat, StatusBadge } from "@/components/ui";
 import { requireUser } from "@/lib/auth/dal";
 import { canAdminister } from "@/lib/auth/roles";
 import { getActiveCycle, loadCycleData, parseRound, summarise } from "@/lib/cycle-data";
 import { naira } from "@/lib/format";
 import { whatsappList } from "@/lib/rules";
+import { receiptLink } from "@/lib/storage";
 import { formatLagos, formatLagosDay, MONTHS, payoutDay, roundDeadline } from "@/lib/time";
+import { VOIDED } from "@/lib/payments";
 import { unwaiveFine, voidPayment, waiveFine } from "../admin/actions";
 
 type SearchParams = PageProps<"/board">["searchParams"];
@@ -19,15 +21,31 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
   if (!cycle) return <NoCycle isAdmin={isAdmin} />;
 
   const now = new Date();
-  const round = parseRound((await searchParams).round, cycle, now);
+  const params = await searchParams;
+  const round = parseRound(params.round, cycle, now);
   const data = await loadCycleData(cycle.id);
   const summary = summarise(cycle, data, round, now);
   const deadline = roundDeadline(cycle.year, round);
   const passed = now > deadline;
 
+  const pendingBy = new Set(data.pending.filter((p) => p.round === round).map((p) => p.payerUserId));
+  // Everyone can see approved receipts, as they could in the WhatsApp group.
+  const receipts = new Map(
+    await Promise.all(
+      data.payments
+        .filter((p) => p.round === round && p.receiptUrl)
+        .map(async (p) => [p.payerUserId, await receiptLink(p.receiptUrl!)] as const),
+    ),
+  );
+
   const rows = summary.members
-    .map((m) => ({ ...m, name: data.names.get(m.userId) ?? "?" }))
+    .map((m) => ({ ...m, name: data.names.get(m.userId) ?? "?", pending: pendingBy.has(m.userId) }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const me = rows.find((r) => r.userId === user.id);
+  const myRejection =
+    me && !me.payment && !me.pending
+      ? data.rejected.find((p) => p.round === round && p.payerUserId === user.id && p.rejectReason !== VOIDED)
+      : undefined;
   const owing = rows.filter((r) => r.owed > 0);
   const paid = owing.filter((r) => r.status === "paid" || r.status === "late");
   const progress = summary.expected ? Math.min(100, (summary.collected / summary.expected) * 100) : 0;
@@ -45,6 +63,34 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
         }
       />
       <RoundPicker href="/board" monthsN={cycle.monthsN} round={round} />
+
+      {params.sent === "1" && (
+        <p className="mb-4 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">
+          Teller sent. It will show as paid once an admin approves it.
+        </p>
+      )}
+
+      {me && (
+        <Card className="mb-4 border-2 border-accent/30">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-48 flex-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-foreground/60">You this round</p>
+              <p className="text-lg font-bold text-brand">
+                {me.owed > 0 ? `${naira(me.owed)} due` : "Nothing due"}
+                {me.own > 0 && " · you're collecting 👑"}
+              </p>
+              {me.pending && <p className="text-sm text-amber-800">Your teller is waiting for approval.</p>}
+              {myRejection && (
+                <p className="text-sm text-red-700">Your last teller was rejected: “{myRejection.rejectReason}”</p>
+              )}
+            </div>
+            <StatusBadge status={me.status} />
+            {!me.payment && !me.pending && me.owed + me.own > 0 && (
+              <Link href={`/pay?round=${round}`} className={btn}>Send teller</Link>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card className="mb-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -71,7 +117,16 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
                   {m.owed > 0 ? `Owes ${naira(m.owed)}` : "Nothing owed"}
                   {m.own > 0 && ` · own month ${naira(m.own)} optional`}
                   {m.payment && ` · teller ${formatLagos(m.payment.tellerAt)}`}
+                  {receipts.has(m.userId) && (
+                    <>
+                      {" · "}
+                      <a href={receipts.get(m.userId)} target="_blank" rel="noreferrer" className="text-brand underline">
+                        receipt
+                      </a>
+                    </>
+                  )}
                 </p>
+                {m.pending && <p className="text-xs font-medium text-amber-800">⏳ Teller waiting for approval</p>}
                 {m.fine > 0 && (
                   <p className={`text-xs font-medium ${m.fineWaived ? "text-foreground/50 line-through" : "text-red-700"}`}>
                     Fine {naira(m.fine)}

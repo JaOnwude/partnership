@@ -10,9 +10,10 @@ import { cycles, fineWaivers, payments, payouts, shares, users } from "@/db/sche
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth/dal";
 import { loadCycleData, summarise } from "@/lib/cycle-data";
+import { preparePayment, VOIDED } from "@/lib/payments";
 import { normalisePhone } from "@/lib/phone";
 import { ALLOWED_AMOUNTS, validateRoster, type Roster } from "@/lib/roster";
-import { memberDue } from "@/lib/rules";
+import { saveReceipt } from "@/lib/storage";
 import { lagosLocalToUtc } from "@/lib/time";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -26,75 +27,104 @@ async function getCycle(cycleId: number) {
 
 // ---- Payments -------------------------------------------------------------
 
+// An admin records a payment directly; it is approved at once. The receipt photo
+// is optional because the admin has usually seen the teller on WhatsApp already.
 export async function recordPayment(_prev: FormState, formData: FormData): Promise<FormState> {
   const admin = await requireAdmin();
-  const parsed = z
-    .object({
-      cycleId: id,
-      round: id,
-      userId: id,
-      tellerAt: z.string(),
-      includeOwn: z.string().optional(),
-      note: z.string().trim().max(200).optional(),
+  const payment = await preparePayment(formData);
+  if ("error" in payment) return payment;
+
+  let receiptKey: string | null = null;
+  const photo = formData.get("receipt");
+  if (photo instanceof File && photo.size > 0) {
+    const saved = await saveReceipt(photo, payment.cycleId, payment.round);
+    if ("error" in saved) return saved;
+    receiptKey = saved.key;
+  }
+
+  const [row] = await getDb()
+    .insert(payments)
+    .values({
+      cycleId: payment.cycleId,
+      round: payment.round,
+      payerUserId: payment.userId,
+      postedByUserId: admin.id,
+      amount: payment.amount,
+      tellerAt: payment.tellerAt,
+      receiptUrl: receiptKey,
+      note: payment.note,
+      status: "approved",
+      reviewedBy: admin.id,
+      reviewedAt: new Date(),
     })
-    .safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Choose a member and fill in the teller time." };
+    .returning({ id: payments.id });
+  await audit(admin.id, "payment.record", "payment", row.id, {
+    round: payment.round, userId: payment.userId, amount: payment.amount,
+    tellerAt: payment.tellerAt.toISOString(),
+  });
+  redirect(`/board?round=${payment.round}`);
+}
 
-  const { cycleId, round, userId, includeOwn, note } = parsed.data;
-  const tellerAt = lagosLocalToUtc(parsed.data.tellerAt);
-  if (!tellerAt) return { error: "Enter the date and time on the teller." };
-  if (tellerAt.getTime() > Date.now() + 5 * 60_000) return { error: "The teller time cannot be in the future." };
-
-  const cycle = await getCycle(cycleId);
-  if (!cycle || cycle.status !== "active" || round > cycle.monthsN) return { error: "That round is not open." };
+// Approves a member-submitted payment. The admin confirms the teller time, which decides lateness.
+export async function approvePayment(paymentId: number, _prev: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireAdmin();
+  const tellerAt = lagosLocalToUtc(String(formData.get("tellerAt") ?? ""));
+  if (!tellerAt) return { error: "Confirm the date and time on the teller." };
 
   const db = getDb();
-  const cycleShares = await db.select().from(shares).where(eq(shares.cycleId, cycleId));
-  const due = memberDue(cycleShares, userId, round);
-  // Payments are always in full: the amount is what the member owes, never typed in.
-  const amount = due.owed + (includeOwn && due.own > 0 ? due.own : 0);
-  if (amount === 0) return { error: "This member owes nothing this round." };
+  const [pending] = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.id, paymentId), eq(payments.status, "pending")))
+    .limit(1);
+  if (!pending) return { error: "This payment was already reviewed." };
 
-  const [existing] = await db
+  const [approved] = await db
     .select({ id: payments.id })
     .from(payments)
     .where(
       and(
-        eq(payments.cycleId, cycleId),
-        eq(payments.round, round),
-        eq(payments.payerUserId, userId),
+        eq(payments.cycleId, pending.cycleId),
+        eq(payments.round, pending.round),
+        eq(payments.payerUserId, pending.payerUserId),
         eq(payments.status, "approved"),
       ),
     )
     .limit(1);
-  if (existing) return { error: "A payment is already recorded for this member this round." };
+  if (approved) return { error: "This member already has an approved payment for this round. Reject this one." };
 
-  const [row] = await db
-    .insert(payments)
-    .values({
-      cycleId,
-      round,
-      payerUserId: userId,
-      postedByUserId: admin.id,
-      amount,
-      tellerAt,
-      status: "approved",
-      reviewedBy: admin.id,
-      reviewedAt: new Date(),
-      note: note || null,
-    })
-    .returning({ id: payments.id });
-  await audit(admin.id, "payment.record", "payment", row.id, {
-    round, userId, amount, tellerAt: tellerAt.toISOString(),
+  await db
+    .update(payments)
+    .set({ status: "approved", tellerAt, reviewedBy: admin.id, reviewedAt: new Date() })
+    .where(and(eq(payments.id, paymentId), eq(payments.status, "pending")));
+  await audit(admin.id, "payment.approve", "payment", paymentId, {
+    round: pending.round, userId: pending.payerUserId, tellerAt: tellerAt.toISOString(),
   });
-  redirect(`/board?round=${round}`);
+  refresh();
+  return { ok: "Approved." };
+}
+
+export async function rejectPayment(paymentId: number, _prev: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireAdmin();
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (reason.length < 3 || reason.length > 200) return { error: "Give the member a short reason." };
+
+  const [row] = await getDb()
+    .update(payments)
+    .set({ status: "rejected", rejectReason: reason, reviewedBy: admin.id, reviewedAt: new Date() })
+    .where(and(eq(payments.id, paymentId), eq(payments.status, "pending")))
+    .returning({ id: payments.id, round: payments.round, userId: payments.payerUserId });
+  if (!row) return { error: "This payment was already reviewed." };
+  await audit(admin.id, "payment.reject", "payment", paymentId, { round: row.round, userId: row.userId, reason });
+  refresh();
+  return { ok: "Rejected." };
 }
 
 export async function voidPayment(paymentId: number) {
   const admin = await requireAdmin();
   const [row] = await getDb()
     .update(payments)
-    .set({ status: "rejected", rejectReason: "Voided by admin", reviewedBy: admin.id, reviewedAt: new Date() })
+    .set({ status: "rejected", rejectReason: VOIDED, reviewedBy: admin.id, reviewedAt: new Date() })
     .where(and(eq(payments.id, paymentId), eq(payments.status, "approved")))
     .returning({ id: payments.id, round: payments.round, userId: payments.payerUserId });
   if (row) await audit(admin.id, "payment.void", "payment", row.id, { round: row.round, userId: row.userId });
