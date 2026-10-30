@@ -66,7 +66,9 @@ export const payments = pgTable(
     amount: integer().notNull(),
     tellerAt: at("teller_at").notNull(),
     submittedAt: at("submitted_at").notNull().defaultNow(),
-    receiptUrl: text("receipt_url").notNull(),
+    // Optional when an admin records a payment whose teller was seen on WhatsApp.
+    receiptUrl: text("receipt_url"),
+    note: text(),
     status: paymentStatusEnum().notNull().default("pending"),
     reviewedBy: integer("reviewed_by").references(() => users.id),
     reviewedAt: at("reviewed_at"),
@@ -75,16 +77,30 @@ export const payments = pgTable(
   (t) => [uniqueIndex("payments_one_approved_per_round").on(t.cycleId, t.round, t.payerUserId).where(sql`${t.status} = 'approved'`)],
 );
 
+// Records that a recipient was paid. Collected and covered amounts are derived
+// from payments, so only the amount actually sent is stored.
 export const payouts = pgTable("payouts", {
   id: id(),
   shareId: integer("share_id").notNull().unique().references(() => shares.id),
   dueAmount: integer("due_amount").notNull(),
-  collectedAmount: integer("collected_amount").notNull(),
-  coveredAmount: integer("covered_amount").notNull().default(0),
   sentAt: at("sent_at"),
   sentBy: integer("sent_by").references(() => users.id),
   receiptUrl: text("receipt_url"),
 });
+
+// Fines are computed; a waiver cancels a member's fine for one round.
+export const fineWaivers = pgTable(
+  "fine_waivers",
+  {
+    id: id(),
+    cycleId: integer("cycle_id").notNull().references(() => cycles.id),
+    round: integer().notNull(),
+    userId: integer("user_id").notNull().references(() => users.id),
+    waivedBy: integer("waived_by").notNull().references(() => users.id),
+    at: at("at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("fine_waivers_one_per_round").on(t.cycleId, t.round, t.userId)],
+);
 
 export const auditLog = pgTable("audit_log", {
   id: id(),
