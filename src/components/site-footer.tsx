@@ -1,3 +1,5 @@
+import { CurrentYear } from "./current-year";
+
 // A quiet footer on every page: what the app is (and isn't) and who to ask.
 export function SiteFooter() {
   return (
@@ -8,7 +10,9 @@ export function SiteFooter() {
           holds or moves money. Keep paying into the group account as usual.
         </p>
         <p>Tellers you upload can be seen by all members. Your bank details are seen only by the admins.</p>
-        <p>Questions? Ask Mrs Nwokolo or Lolo Onyeze · Partnership since 2022</p>
+        <p>
+          Questions? Ask Mrs Nwokolo · © Partnership <CurrentYear since={2022} />
+        </p>
       </div>
     </footer>
   );
