@@ -47,5 +47,5 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
 
   await db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id));
   await createSession(user.id);
-  redirect("/dashboard");
+  redirect("/board");
 }

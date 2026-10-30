@@ -25,6 +25,6 @@ export async function requireUser() {
 
 export async function requireAdmin() {
   const user = await requireUser();
-  if (!canAdminister(user.role)) redirect("/dashboard");
+  if (!canAdminister(user.role)) redirect("/board");
   return user;
 }

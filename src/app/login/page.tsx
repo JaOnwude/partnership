@@ -5,7 +5,7 @@ import { LoginForm } from "./login-form";
 
 // Signed-in users skip the form. The session read streams in behind Suspense.
 async function RedirectIfSignedIn() {
-  if (await getCurrentUser()) redirect("/dashboard");
+  if (await getCurrentUser()) redirect("/board");
   return null;
 }
 
