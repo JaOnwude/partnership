@@ -14,18 +14,19 @@ function bucket() {
 export const MAX_RECEIPT_BYTES = 3 * 1024 * 1024;
 const EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
-// Stores a teller photo and returns its object key (saved on the payment row).
+// Stores a teller (or payout transfer) photo and returns its object key, saved on the row.
 export async function saveReceipt(
   file: unknown,
   cycleId: number,
   round: number,
+  folder: "tellers" | "payouts" = "tellers",
 ): Promise<{ key: string } | { error: string }> {
-  if (!(file instanceof File) || file.size === 0) return { error: "Attach a photo of the teller." };
+  if (!(file instanceof File) || file.size === 0) return { error: "Attach a photo of the receipt." };
   const ext = EXTENSIONS[file.type];
   if (!ext) return { error: "The receipt must be a JPEG, PNG or WebP photo." };
   if (file.size > MAX_RECEIPT_BYTES) return { error: "That photo is too large (3 MB max)." };
 
-  const key = `${cycleId}/${round}/${randomUUID()}.${ext}`;
+  const key = `${folder}/${cycleId}/${round}/${randomUUID()}.${ext}`;
   await bucket().upload(key, new Uint8Array(await file.arrayBuffer()), { contentType: file.type });
   return { key };
 }

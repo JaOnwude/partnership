@@ -1,5 +1,8 @@
+import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { Suspense } from "react";
+import { getDb } from "@/db";
+import { users } from "@/db/schema";
 import { CopyButton } from "@/components/copy-button";
 import { btn, btnGhost, Card, Loading, NoCycle, PageTitle, RoundPicker, Stat, StatusBadge } from "@/components/ui";
 import { requireUser } from "@/lib/auth/dal";
@@ -41,7 +44,19 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
   const rows = summary.members
     .map((m) => ({ ...m, name: data.names.get(m.userId) ?? "?", pending: pendingBy.has(m.userId) }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const payoutProofs = new Map(
+    await Promise.all(
+      summary.recipients
+        .map((r) => data.payouts.get(r.share.id))
+        .filter((p) => p?.receiptUrl)
+        .map(async (p) => [p!.shareId, await receiptLink(p!.receiptUrl!)] as const),
+    ),
+  );
   const me = rows.find((r) => r.userId === user.id);
+  const needsAccount =
+    me !== undefined &&
+    me.own > 0 &&
+    !(await getDb().select({ b: users.bankDetails }).from(users).where(eq(users.id, user.id)))[0]?.b;
   const myRejection =
     me && !me.payment && !me.pending
       ? data.rejected.find((p) => p.round === round && p.payerUserId === user.id && p.rejectReason !== VOIDED)
@@ -82,6 +97,12 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
               {me.pending && <p className="text-sm text-amber-800">Your teller is waiting for approval.</p>}
               {myRejection && (
                 <p className="text-sm text-red-700">Your last teller was rejected: “{myRejection.rejectReason}”</p>
+              )}
+              {needsAccount && (
+                <p className="text-sm">
+                  <Link href="/account" className="font-medium text-accent underline">Add your account details</Link>{" "}
+                  so your payout can be sent.
+                </p>
               )}
             </div>
             <StatusBadge status={me.status} />
@@ -162,6 +183,36 @@ async function Board({ searchParams }: { searchParams: SearchParams }) {
           ))}
         </ul>
       </Card>
+
+      {summary.recipients.length > 0 && (
+        <Card className="mb-4">
+          <h2 className="mb-2 font-semibold text-brand">Payouts this round</h2>
+          <ul className="divide-y divide-brand/10">
+            {summary.recipients.map((r) => {
+              const sent = data.payouts.get(r.share.id);
+              return (
+                <li key={r.share.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-sm">
+                  <span className="flex-1 font-medium">👑 {data.names.get(r.share.userId)}</span>
+                  {sent?.sentAt ? (
+                    <>
+                      <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">
+                        {naira(sent.dueAmount)} sent {formatLagosDay(sent.sentAt)}
+                      </span>
+                      {payoutProofs.has(r.share.id) && (
+                        <a href={payoutProofs.get(r.share.id)} target="_blank" rel="noreferrer" className="text-brand underline">
+                          proof
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-foreground/60">Due {formatLagosDay(payoutDay(cycle.year, round))}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
 
       <Card>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

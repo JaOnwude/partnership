@@ -11,6 +11,7 @@ async function Nav() {
   const user = await requireUser();
   const links = [
     { href: "/board", label: "Board" },
+    { href: "/updates", label: "Updates" },
     { href: "/pay", label: "Pay" },
   ];
   if (canAdminister(user.role)) {
@@ -34,7 +35,9 @@ async function Nav() {
           {l.label}
         </Link>
       ))}
-      <span className="ml-auto text-white/80">{user.name}</span>
+      <Link href="/account" title="Your payout account" className="ml-auto text-white/80 underline-offset-2 hover:underline">
+        {user.name}
+      </Link>
       <form action={logout}>
         <button type="submit" className="rounded-lg bg-white/15 px-3 py-1 font-medium hover:bg-white/25">
           Sign out

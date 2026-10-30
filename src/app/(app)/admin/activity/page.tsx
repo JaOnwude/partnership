@@ -22,6 +22,9 @@ const LABELS: Record<string, string> = {
   "share.add": "placed a share",
   "share.remove": "removed a share",
   "member.add": "added a member",
+  "account.bank": "updated their payout account",
+  "post.create": "posted an update",
+  "post.delete": "deleted an update",
 };
 
 type Detail = { round?: number; userId?: number; amount?: number; reason?: string; name?: string; year?: number };

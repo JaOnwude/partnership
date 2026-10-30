@@ -6,15 +6,17 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { cycles, fineWaivers, payments, payouts, shares, users } from "@/db/schema";
+import { cycles, fineWaivers, payments, payouts, posts, shares, users } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth/dal";
 import { loadCycleData, summarise } from "@/lib/cycle-data";
 import { preparePayment, VOIDED } from "@/lib/payments";
 import { normalisePhone } from "@/lib/phone";
 import { ALLOWED_AMOUNTS, validateRoster, type Roster } from "@/lib/roster";
+import { naira } from "@/lib/format";
 import { saveReceipt } from "@/lib/storage";
 import { lagosLocalToUtc } from "@/lib/time";
+import { announcePayment, announcePayout, postUpdate, retractPayout } from "@/lib/updates";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -62,6 +64,7 @@ export async function recordPayment(_prev: FormState, formData: FormData): Promi
     round: payment.round, userId: payment.userId, amount: payment.amount,
     tellerAt: payment.tellerAt.toISOString(),
   });
+  await announcePayment(payment.cycleId, payment.round, payment.userId);
   redirect(`/board?round=${payment.round}`);
 }
 
@@ -100,6 +103,7 @@ export async function approvePayment(paymentId: number, _prev: FormState, formDa
   await audit(admin.id, "payment.approve", "payment", paymentId, {
     round: pending.round, userId: pending.payerUserId, tellerAt: tellerAt.toISOString(),
   });
+  await announcePayment(pending.cycleId, pending.round, pending.payerUserId);
   refresh();
   return { ok: "Approved." };
 }
@@ -154,30 +158,66 @@ export async function unwaiveFine(cycleId: number, round: number, userId: number
 
 // ---- Payouts --------------------------------------------------------------
 
-export async function markPayoutSent(shareId: number) {
+// Marks a recipient paid, with an optional photo of the transfer receipt that
+// everyone can see on the board and in the updates feed.
+export async function markPayoutSent(shareId: number, _prev: FormState, formData: FormData): Promise<FormState> {
   const admin = await requireAdmin();
   const db = getDb();
   const [share] = await db.select().from(shares).where(eq(shares.id, shareId)).limit(1);
   const cycle = share && (await getCycle(share.cycleId));
-  if (!share || !cycle) throw new Error("Share not found");
+  if (!share || !cycle) return { error: "Share not found." };
 
   const data = await loadCycleData(cycle.id);
   const summary = summarise(cycle, data, share.payoutMonth, new Date());
   const recipient = summary.recipients.find((r) => r.share.id === shareId);
-  if (!recipient) throw new Error("Share is not a recipient this round");
+  if (!recipient) return { error: "This share is not collecting this round." };
+  if (data.payouts.has(shareId)) return { error: "Already marked sent." };
+
+  let proofKey: string | null = null;
+  const proof = formData.get("proof");
+  if (proof instanceof File && proof.size > 0) {
+    const saved = await saveReceipt(proof, cycle.id, share.payoutMonth, "payouts");
+    if ("error" in saved) return saved;
+    proofKey = saved.key;
+  }
 
   await db
     .insert(payouts)
-    .values({ shareId, dueAmount: recipient.net, sentAt: new Date(), sentBy: admin.id })
+    .values({ shareId, dueAmount: recipient.net, sentAt: new Date(), sentBy: admin.id, receiptUrl: proofKey })
     .onConflictDoNothing();
-  await audit(admin.id, "payout.sent", "share", shareId, { amount: recipient.net });
+  await audit(admin.id, "payout.sent", "share", shareId, { userId: share.userId, amount: recipient.net });
+  await announcePayout(cycle.id, share.payoutMonth, share.userId, naira(recipient.net), proofKey);
   refresh();
+  return { ok: "Marked sent." };
 }
 
 export async function undoPayout(shareId: number) {
   const admin = await requireAdmin();
-  await getDb().delete(payouts).where(eq(payouts.shareId, shareId));
-  await audit(admin.id, "payout.undo", "share", shareId);
+  const db = getDb();
+  const [share] = await db.select().from(shares).where(eq(shares.id, shareId)).limit(1);
+  if (!share) return;
+  await db.delete(payouts).where(eq(payouts.shareId, shareId));
+  await retractPayout(share.cycleId, share.payoutMonth, share.userId);
+  await audit(admin.id, "payout.undo", "share", shareId, { userId: share.userId });
+  refresh();
+}
+
+// ---- Updates feed ---------------------------------------------------------
+
+export async function postAnnouncement(_prev: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireAdmin();
+  const body = String(formData.get("body") ?? "").replace(/\r\n/g, "\n").trim();
+  if (body.length < 2 || body.length > 2000) return { error: "Write a message first." };
+  await postUpdate({ kind: "announcement", authorId: admin.id, body });
+  await audit(admin.id, "post.create", "post", null);
+  refresh();
+  return { ok: "Posted." };
+}
+
+export async function deletePost(postId: number) {
+  const admin = await requireAdmin();
+  await getDb().delete(posts).where(eq(posts.id, postId));
+  await audit(admin.id, "post.delete", "post", postId);
   refresh();
 }
 
