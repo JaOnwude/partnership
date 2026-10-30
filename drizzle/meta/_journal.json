@@ -15,6 +15,13 @@
       "when": 1793397208432,
       "tag": "0001_m1_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793398732657,
+      "tag": "0002_payouts_and_updates",
+      "breakpoints": true
     }
   ]
 }

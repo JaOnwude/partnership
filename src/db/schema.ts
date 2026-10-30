@@ -28,6 +28,8 @@ export const users = pgTable("users", {
   // Owner switches the delegate admin on while she is unavailable.
   delegateEnabled: boolean("delegate_enabled").notNull().default(false),
   active: boolean().notNull().default(true),
+  // Payout account (bank, number, name), AES-GCM encrypted by src/lib/crypto.ts. Admins only.
+  bankDetails: text("bank_details"),
   failedAttempts: integer("failed_attempts").notNull().default(0),
   lockedUntil: at("locked_until"),
   createdAt: at("created_at").notNull().defaultNow(),
@@ -101,6 +103,22 @@ export const fineWaivers = pgTable(
   },
   (t) => [uniqueIndex("fine_waivers_one_per_round").on(t.cycleId, t.round, t.userId)],
 );
+
+// The updates feed: admin announcements plus posts the app writes itself.
+export const postKindEnum = pgEnum("post_kind", ["announcement", "payment", "pot_complete", "payout"]);
+
+export const posts = pgTable("posts", {
+  id: id(),
+  cycleId: integer("cycle_id").references(() => cycles.id),
+  round: integer(),
+  kind: postKindEnum().notNull(),
+  // Null for posts the app writes itself.
+  authorId: integer("author_id").references(() => users.id),
+  body: text().notNull(),
+  // Storage key of an attached image, e.g. a payout transfer receipt.
+  attachmentKey: text("attachment_key"),
+  at: at("at").notNull().defaultNow(),
+});
 
 export const auditLog = pgTable("audit_log", {
   id: id(),
