@@ -3,11 +3,21 @@ import { randomUUID } from "node:crypto";
 import { Files } from "files-sdk";
 import { neon } from "files-sdk/neon";
 
-// Neon Object Storage, private bucket declared in neon.ts. Credentials come from
-// the AWS_* variables that `neon deploy` / `neon env pull` write.
+// Neon Object Storage, private bucket declared in neon.ts. Locally the credentials are
+// the AWS_* variables `neon env pull` writes. On Vercel those names are reserved (and
+// the runtime sets its own AWS keys), so production uses NEON_STORAGE_* instead.
 let receipts: Files | undefined;
 function bucket() {
-  receipts ??= new Files({ adapter: neon({ bucket: "receipts" }) });
+  const env = process.env;
+  receipts ??= new Files({
+    adapter: neon({
+      bucket: "receipts",
+      endpoint: env.NEON_STORAGE_ENDPOINT ?? env.AWS_ENDPOINT_URL_S3,
+      region: env.NEON_STORAGE_REGION ?? env.AWS_REGION,
+      accessKeyId: env.NEON_STORAGE_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.NEON_STORAGE_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY,
+    }),
+  });
   return receipts;
 }
 
