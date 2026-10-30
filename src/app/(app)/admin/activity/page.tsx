@@ -25,6 +25,9 @@ const LABELS: Record<string, string> = {
   "account.bank": "updated their payout account",
   "post.create": "posted an update",
   "post.delete": "deleted an update",
+  "account.pin": "changed their PIN",
+  "delegate.on": "handed over to the delegate admin",
+  "delegate.off": "switched the delegate admin off",
 };
 
 type Detail = { round?: number; userId?: number; amount?: number; reason?: string; name?: string; year?: number };

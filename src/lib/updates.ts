@@ -1,8 +1,10 @@
 import "server-only";
 import { and, eq, like } from "drizzle-orm";
+import { after } from "next/server";
 import { getDb } from "@/db";
 import { cycles, posts, users } from "@/db/schema";
 import { loadCycleData, summarise } from "./cycle-data";
+import { notify } from "./push";
 import { MONTHS } from "./time";
 
 type NewPost = typeof posts.$inferInsert;
@@ -11,7 +13,7 @@ export async function postUpdate(values: NewPost) {
   await getDb().insert(posts).values(values);
 }
 
-async function nameOf(userId: number) {
+export async function nameOf(userId: number) {
   const [user] = await getDb().select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
   return user?.name ?? "A member";
 }
@@ -22,6 +24,12 @@ export async function announcePayment(cycleId: number, round: number, userId: nu
     cycleId, round, kind: "payment",
     body: `Payment received from ${await nameOf(userId)} for the ${MONTHS[round - 1]} round ✅`,
   });
+  after(() =>
+    notify(
+      { userIds: [userId] },
+      { title: "Payment confirmed ✅", body: `Your ${MONTHS[round - 1]} contribution is confirmed.`, url: `/board?round=${round}` },
+    ),
+  );
 
   const db = getDb();
   const [cycle] = await db.select().from(cycles).where(eq(cycles.id, cycleId)).limit(1);
@@ -35,10 +43,9 @@ export async function announcePayment(cycleId: number, round: number, userId: nu
     .where(and(eq(posts.cycleId, cycleId), eq(posts.round, round), eq(posts.kind, "pot_complete")))
     .limit(1);
   if (!already) {
-    await postUpdate({
-      cycleId, round, kind: "pot_complete",
-      body: `${MONTHS[round - 1]} contributions paid in full 🙌 Thank you all!`,
-    });
+    const body = `${MONTHS[round - 1]} contributions paid in full 🙌 Thank you all!`;
+    await postUpdate({ cycleId, round, kind: "pot_complete", body });
+    after(() => notify({ everyone: true }, { title: "Partnership", body, url: "/updates" }));
   }
 }
 
@@ -51,6 +58,12 @@ export async function announcePayout(
     cycleId, round, kind: "payout", attachmentKey,
     body: `${payoutBody(await nameOf(userId))}: ${amountText} for the ${MONTHS[round - 1]} round 🎉`,
   });
+  after(() =>
+    notify(
+      { userIds: [userId] },
+      { title: "Your payout has been sent 🎉", body: `${amountText} for the ${MONTHS[round - 1]} round.`, url: "/updates" },
+    ),
+  );
 }
 
 // When a payout is undone, remove the post that announced it.

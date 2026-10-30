@@ -1,5 +1,6 @@
 "use server";
 
+import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { z } from "zod";
@@ -9,6 +10,22 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth/dal";
 import { sealBankDetails } from "@/lib/crypto";
 import type { FormState } from "../admin/actions";
+
+export async function changePin(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const current = String(formData.get("current") ?? "");
+  const next = String(formData.get("next") ?? "");
+  if (!/^\d{6}$/.test(next)) return { error: "The new PIN must be 6 digits." };
+  if (next !== formData.get("confirm")) return { error: "The new PINs don't match." };
+
+  const db = getDb();
+  const [row] = await db.select({ pinHash: users.pinHash }).from(users).where(eq(users.id, user.id));
+  if (!row || !(await bcrypt.compare(current, row.pinHash))) return { error: "Your current PIN is wrong." };
+
+  await db.update(users).set({ pinHash: await bcrypt.hash(next, 10) }).where(eq(users.id, user.id));
+  await audit(user.id, "account.pin", "user", user.id);
+  return { ok: "PIN changed. Use the new one next time you sign in." };
+}
 
 export async function saveBankDetails(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser();

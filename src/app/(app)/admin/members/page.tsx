@@ -1,16 +1,16 @@
 import { asc } from "drizzle-orm";
 import { Suspense } from "react";
 import { ActionForm } from "@/components/action-form";
-import { Card, field, label, Loading, PageTitle } from "@/components/ui";
+import { btnGhost, Card, field, label, Loading, PageTitle } from "@/components/ui";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/dal";
-import { addMember } from "../actions";
+import { addMember, setDelegate } from "../actions";
 
 const ROLE = { owner: "Owner", admin: "Delegate admin", member: "Member" } as const;
 
 async function MemberList() {
-  await requireAdmin();
+  const viewer = await requireAdmin();
   const rows = await getDb().select().from(users).orderBy(asc(users.name));
   return (
     <ul className="divide-y divide-brand/10">
@@ -20,11 +20,20 @@ async function MemberList() {
             <p className="font-medium">{u.name}</p>
             <p className="text-xs text-foreground/60">{u.phone}</p>
           </div>
-          <span className="text-xs font-medium text-foreground/70">
-            {ROLE[u.role]}
-            {u.role === "admin" && (u.delegateEnabled ? " · on" : " · off")}
-            {!u.active && " · inactive"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-foreground/70">
+              {ROLE[u.role]}
+              {u.role === "admin" && (u.delegateEnabled ? " · acting now" : " · standing by")}
+              {!u.active && " · inactive"}
+            </span>
+            {viewer.role === "owner" && u.role === "admin" && (
+              <form action={setDelegate.bind(null, u.id, !u.delegateEnabled)}>
+                <button type="submit" className={btnGhost}>
+                  {u.delegateEnabled ? "Switch off" : "Hand over"}
+                </button>
+              </form>
+            )}
+          </div>
         </li>
       ))}
     </ul>

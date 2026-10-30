@@ -4,18 +4,20 @@ import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { cycles, fineWaivers, payments, payouts, posts, shares, users } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth/dal";
+import { requireAdmin, requireOwner } from "@/lib/auth/dal";
 import { loadCycleData, summarise } from "@/lib/cycle-data";
 import { preparePayment, VOIDED } from "@/lib/payments";
 import { normalisePhone } from "@/lib/phone";
 import { ALLOWED_AMOUNTS, validateRoster, type Roster } from "@/lib/roster";
 import { naira } from "@/lib/format";
+import { notify } from "@/lib/push";
 import { saveReceipt } from "@/lib/storage";
-import { lagosLocalToUtc } from "@/lib/time";
+import { lagosLocalToUtc, MONTHS } from "@/lib/time";
 import { announcePayment, announcePayout, postUpdate, retractPayout } from "@/lib/updates";
 
 export type FormState = { error?: string; ok?: string } | undefined;
@@ -120,6 +122,12 @@ export async function rejectPayment(paymentId: number, _prev: FormState, formDat
     .returning({ id: payments.id, round: payments.round, userId: payments.payerUserId });
   if (!row) return { error: "This payment was already reviewed." };
   await audit(admin.id, "payment.reject", "payment", paymentId, { round: row.round, userId: row.userId, reason });
+  after(() =>
+    notify(
+      { userIds: [row.userId] },
+      { title: "Teller not accepted", body: `Your ${MONTHS[row.round - 1]} teller was rejected: ${reason}`, url: `/board?round=${row.round}` },
+    ),
+  );
   refresh();
   return { ok: "Rejected." };
 }
@@ -210,6 +218,13 @@ export async function postAnnouncement(_prev: FormState, formData: FormData): Pr
   if (body.length < 2 || body.length > 2000) return { error: "Write a message first." };
   await postUpdate({ kind: "announcement", authorId: admin.id, body });
   await audit(admin.id, "post.create", "post", null);
+  const preview = body.replace(/\*/g, "").replace(/\s+/g, " ");
+  after(() =>
+    notify(
+      { everyone: true },
+      { title: `📣 ${admin.name}`, body: preview.length > 140 ? `${preview.slice(0, 137)}…` : preview, url: "/updates" },
+    ),
+  );
   refresh();
   return { ok: "Posted." };
 }
@@ -313,6 +328,17 @@ export async function finalizeCycle(cycleId: number) {
 }
 
 // ---- Members --------------------------------------------------------------
+
+// Only the owner switches the delegate admin on (e.g. while she is away) and off.
+export async function setDelegate(userId: number, enabled: boolean) {
+  const owner = await requireOwner();
+  await getDb()
+    .update(users)
+    .set({ delegateEnabled: enabled })
+    .where(and(eq(users.id, userId), eq(users.role, "admin")));
+  await audit(owner.id, enabled ? "delegate.on" : "delegate.off", "user", userId, { userId });
+  refresh();
+}
 
 export async function addMember(_prev: FormState, formData: FormData): Promise<FormState> {
   const admin = await requireAdmin();

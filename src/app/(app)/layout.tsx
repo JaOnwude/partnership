@@ -13,19 +13,14 @@ async function Nav() {
     { href: "/board", label: "Board" },
     { href: "/updates", label: "Updates" },
     { href: "/pay", label: "Pay" },
+    { href: "/history", label: "History" },
   ];
   if (canAdminister(user.role)) {
     const [{ waiting }] = await getDb()
       .select({ waiting: count() })
       .from(payments)
       .where(eq(payments.status, "pending"));
-    links.push(
-      { href: "/admin/approvals", label: waiting ? `Approvals (${waiting})` : "Approvals" },
-      { href: "/admin/payouts", label: "Payouts" },
-      { href: "/admin/cycles", label: "Cycles" },
-      { href: "/admin/members", label: "Members" },
-      { href: "/admin/activity", label: "Activity" },
-    );
+    links.push({ href: "/admin", label: waiting ? `Admin (${waiting})` : "Admin" });
   }
 
   return (

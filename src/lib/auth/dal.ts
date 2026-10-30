@@ -23,6 +23,12 @@ export async function requireUser() {
   return user;
 }
 
+export async function requireOwner() {
+  const user = await requireUser();
+  if (user.role !== "owner") redirect("/board");
+  return user;
+}
+
 export async function requireAdmin() {
   const user = await requireUser();
   if (!canAdminister(user.role)) redirect("/board");
