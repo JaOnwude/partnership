@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Brand tokens: orchid purple + hot pink on a blush background.
+   Status colours (green / amber / red) stay separate from the brand colours. */
+:root {
+  --background: #fff5fa;
+  --foreground: #2a1740;
+  --brand: #5b2a86;
+  --accent: #e6398f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-brand: var(--brand);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
